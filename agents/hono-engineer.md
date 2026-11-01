@@ -28,7 +28,7 @@ Untuk setiap tugas non-trivial:
 4. **Design**: Pilih arsitektur proporsional (simple modular untuk fitur kecil, domain-driven modular untuk monolith bisnis).
 5. **Plan**: Rinci langkah implementasi dan strategi verifikasi (test/migration).
 6. **Implement**: Tulis kode yang rapi, type-safe, dan ikuti wiring checklist.
-7. **Verify**: Jalankan typecheck, migration check, dan unit/integration test (`bun test`).
+7. **Verify**: Jalankan `bunx tsc --noEmit`, lint (jika tersedia), `bun test` (unit/integration), dan pastikan `db:generate`/`db:migrate` sukses. Jangan klaim lulus tanpa menjalankan command nyata.
 8. **Review**: Lakukan self-review terhadap security, race condition, N+1 query, dan error handling.
 9. **Report**: Laporkan berkas yang diubah, status migrasi, hasil test nyata, dan sisa risiko.
 
@@ -60,6 +60,7 @@ Untuk setiap tugas non-trivial:
 - **Timeout Wajib**: Setiap panggilan HTTP ke vendor eksternal wajib menyertakan batas waktu via `AbortSignal.timeout(ms)` (toleransi 10–15 detik).
 - **Zod Contract Parsing**: Selalu validasi response payload dari vendor pihak ketiga dengan skema Zod sebelum diproses aplikasi.
 - **Fail-Safe Caching**: Operasi Redis pendukung cache wajib dibungkus try/catch fail-open agar aplikasi tetap menyala saat Redis offline.
+- **Fallback & Circuit Behavior**: Tentukan perilaku saat vendor/Redis gagal sebelum implementasi: fallback data statis, queue ulang, atau fail-fast. Cache boleh fail-open; operasi yang menyentuh uang/mutasi wajib fail-closed.
 
 ### E. Disiplin Lingkungan & Wiring
 - **Environment Variables**: Dilarang mengakses `process.env` mentah di file modul! Wajib daftarkan di Zod `src/core/config/env.ts` dan `.env.example`.
@@ -79,6 +80,9 @@ Untuk setiap tugas non-trivial:
 - **Health Check & Readiness**: Wajib sediakan endpoint `/health` yang mengembalikan status `ok`. Endpoint ini digunakan load balancer dan container orchestrator.
 - **Rate Limit Wajib**: Pasang `strictRateLimit` (max 5 req/menit per IP) pada semua endpoint sensitif: login, register, OTP, dan endpoint publik lainnya.
 - **Backward Compatibility**: Jika mengubah response contract API yang sudah aktif digunakan, wajib additive change atau buat versi baru endpoint. Dilarang breaking change tanpa koordinasi.
+- **Request ID & Trace Context**: Setiap request wajib punya correlation ID (terima header `X-Request-Id` atau generate UUID) yang dicatat di log terstruktur dan diteruskan saat memanggil service lain.
+- **Logging Terstruktur & Redact**: Log wajib terstruktur (timestamp, level, request ID). Dilarang mencatat secret, token, OTP, atau PII.
+- **Error Handling Konsisten**: Setiap `catch` wajib mengembalikan `apiError` dengan status code benar (400/401/403/404/409/429/500). Gunakan `app.onError` terpusat; jangan kembalikan raw exception, stack trace, atau detail SQL ke client.
 
 ---
 
@@ -105,3 +109,5 @@ Sebuah implementasi dianggap selesai hanya jika:
 4. Wiring checklist lengkap dan migrasi database sukses dijalankan.
 5. Unit test runnable (`bun test`) berhasil 100% tanpa kegagalan (0 fail).
 6. File yang berubah, status migrasi, dan hasil pengujian dilaporkan dengan jelas.
+7. Error handling memakai `apiError` konsisten dan log tidak membocorkan data sensitif.
+8. Deploy readiness: migrasi sudah diterapkan, connection pool siap, dan endpoint `/health` mengembalikan `ok`.
