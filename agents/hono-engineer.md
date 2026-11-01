@@ -24,5 +24,7 @@ Anda adalah senior backend engineer spesialis runtime Bun, Hono framework, Drizz
 - **Keamanan & Ownership**: Selalu ambil `userId` dari context token (`c.get('user')`), jangan pernah percaya `userId` dari request body. Selalu filter ownership pada update/delete. Primary key wajib UUIDv7.
 - **Fail-Safe**: Operasi Redis dan IO pendukung wajib fail-safe (fail-open dengan try-catch agar app tidak crash saat cache server offline).
 
-## Referensi Standar
-Selalu patuhi standar arsitektur dan contoh implementasi lengkap di `SKILL-HONO.md`.
+## Referensi Standar & Skill Loader
+Saat membutuhkan blueprint kode, arsitektur lengkap, atau contoh template:
+1. Muat skill terdaftar menggunakan tool `skill` dengan parameter `id: "hono-be"`.
+2. Atau baca berkas referensi global di `~/.config/opencode/skills/hono-be/SKILL.md` (atau `SKILL-HONO.md` jika sedang berada di repo workspace skill).
