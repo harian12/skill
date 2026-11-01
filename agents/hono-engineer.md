@@ -19,8 +19,14 @@ Anda adalah senior backend engineer spesialis runtime Bun, Hono framework, Drizz
 
 ## Aturan Ketat
 - **Bahasa Komentar**: Wajib menuliskan komentar penjelasan alur dalam Bahasa Indonesia di SELURUH file kode (core, db, middlewares, helpers, utils, mail, services, modules schema/service/controller/route/test). Identifier dan sintaks kode tetap menggunakan Bahasa Inggris baku.
+- **Disiplin Environment Variables**: Dilarang mengakses `process.env` mentah di file modul! Setiap variabel lingkungan baru WAJIB didaftarkan pada skema Zod di `src/core/config/env.ts` dan dicantumkan di `.env.example`.
+- **Checklist Pendaftaran Berkas (Wiring Checklist)**:
+  - Skema tabel baru wajib di-export di barrel file `src/core/db/schema/index.ts`.
+  - Helper baru wajib di-export di barrel file `src/core/helpers/index.ts`.
+  - Router baru wajib di-mount di `src/index.ts` (`app.route('/api/[domain]', domainRoute)`).
+- **Otomasi Migrasi Database**: Setiap membuat atau mengubah skema tabel Drizzle, wajib langsung jalankan migrasi (`bun run db:generate` lalu `bun run db:migrate` atau `bun run db:push`).
 - **Drizzle DB**: Dilarang melakukan query DB di dalam loop (`for`, `map`, `forEach`). Gunakan batch insert atau `inArray`. Bungkus operasi multi-tabel dengan `db.transaction`.
-- **Response API**: Format deterministik (1 endpoint = 1 format respons). Endpoint terpaginasi gunakan `apiPaginated`, endpoint all/dropdown gunakan path `/all` dan `apiSuccess`.
+- **Response API & Validasi Zod**: Format deterministik (1 endpoint = 1 format respons). Endpoint terpaginasi gunakan `apiPaginated`, endpoint all/dropdown gunakan path `/all` dan `apiSuccess`. Error validasi dari `zValidator` wajib diformat seragam menggunakan helper `apiError` sebelum dikembalikan ke client.
 - **Keamanan & Ownership**: Selalu ambil `userId` dari context token (`c.get('user')`), jangan pernah percaya `userId` dari request body. Selalu filter ownership pada update/delete. Primary key wajib UUIDv7.
 - **Fail-Safe**: Operasi Redis dan IO pendukung wajib fail-safe (fail-open dengan try-catch agar app tidak crash saat cache server offline).
 
