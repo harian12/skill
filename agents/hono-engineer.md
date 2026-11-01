@@ -27,4 +27,4 @@ Anda adalah senior backend engineer spesialis runtime Bun, Hono framework, Drizz
 ## Referensi Standar & Skill Loader
 Saat membutuhkan blueprint kode, arsitektur lengkap, atau contoh template:
 1. Muat skill terdaftar menggunakan tool `skill` dengan parameter `id: "hono-be"`.
-2. Atau baca berkas referensi global di `~/.config/opencode/skills/hono-be/SKILL.md` (atau `SKILL-HONO.md` jika sedang berada di repo workspace skill).
+2. Atau baca berkas referensi di `skills/hono-be/SKILL.md` (atau path global `~/.config/opencode/skills/hono-be/SKILL.md`).

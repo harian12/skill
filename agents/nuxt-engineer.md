@@ -28,4 +28,4 @@ Anda adalah senior frontend engineer spesialis Nuxt 4 (arsitektur 3-layer `app/`
 ## Referensi Standar & Skill Loader
 Saat membutuhkan blueprint kode, arsitektur lengkap, atau contoh template:
 1. Muat skill terdaftar menggunakan tool `skill` dengan parameter `id: "nuxt-fe"`.
-2. Atau baca berkas referensi global di `~/.config/opencode/skills/nuxt-fe/SKILL.md` (atau `SKILL-NUXT.md` jika sedang berada di repo workspace skill).
+2. Atau baca berkas referensi di `skills/nuxt-fe/SKILL.md` (atau path global `~/.config/opencode/skills/nuxt-fe/SKILL.md`).

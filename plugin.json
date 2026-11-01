@@ -1,0 +1,10 @@
+{
+  "name": "fullstack-skills",
+  "version": "1.0.0",
+  "description": "Enterprise Hono Backend and Nuxt 4 Frontend Skills & Subagents",
+  "author": {
+    "name": "harian12"
+  },
+  "repository": "https://github.com/harian12/skill",
+  "skills": "./skills/"
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@harian12/skill",
+  "version": "1.0.0",
+  "description": "Enterprise Hono and Nuxt 4 skills & agents",
+  "main": "plugin.json",
+  "keywords": [
+    "hono",
+    "nuxt",
+    "opencode",
+    "agent-plugins",
+    "skills",
+    "agents"
+  ],
+  "author": "harian12",
+  "license": "MIT"
+}
