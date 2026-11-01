@@ -69,7 +69,7 @@ Pilih salah satu alur kerja saat mengeksekusi instruksi:
 
 ---
 
-## 1. Setup Project & Dependencies (Versi Terbaru)
+## 2. Setup Project & Dependencies (Versi Terbaru)
 
 Gunakan runtime **Bun**. Jalankan perintah instalasi berikut:
 
@@ -122,7 +122,7 @@ Konfigurasi `tsconfig.json`:
 
 ---
 
-## 2. Struktur Direktori Standar
+## 3. Struktur Direktori Standar
 
 ```text
 ├── drizzle/                      # File migrasi SQL hasil generate Drizzle
@@ -177,7 +177,7 @@ Konfigurasi `tsconfig.json`:
 
 ---
 
-## 3. Implementasi Core Standar
+## 4. Implementasi Core Standar
 
 ### A. Fail-Fast Environment Validation (`src/core/config/env.ts`)
 ```typescript
@@ -395,9 +395,164 @@ export const deleteSession = async (token: string) =>
   await delCache(`token:${token}`)
 ```
 
+### F. Auth Util (`src/core/utils/auth.util.ts`)
+```typescript
+import argon2 from 'argon2'
+import jwt from 'jsonwebtoken'
+import { env } from '../config/env'
+
+export interface JwtPayload {
+  id: string
+  sub: string
+  role: string
+  iat?: number
+  exp?: number
+}
+
+// Hash password menggunakan Argon2id
+export const hashPassword = async (plain: string): Promise<string> =>
+  argon2.hash(plain, { type: argon2.argon2id })
+
+// Verifikasi password terhadap hash Argon2id yang tersimpan
+export const verifyPassword = async (hash: string, plain: string): Promise<boolean> => {
+  try {
+    return await argon2.verify(hash, plain)
+  } catch {
+    return false
+  }
+}
+
+// Buat access token JWT dengan masa berlaku 1 hari
+export const signToken = (payload: Omit<JwtPayload, 'iat' | 'exp'>): string =>
+  jwt.sign(payload, env.JWT_SECRET, { expiresIn: '1d' })
+
+// Verifikasi dan decode token JWT
+export const verifyToken = (token: string): JwtPayload | null => {
+  try {
+    return jwt.verify(token, env.JWT_SECRET) as JwtPayload
+  } catch {
+    return null
+  }
+}
+```
+
+### G. Rate Limit Middleware (`src/core/middlewares/rateLimit.middleware.ts`)
+```typescript
+import type { Context, Next } from 'hono'
+import { redis } from '../db/redis'
+import { apiError } from '../utils/response.util'
+
+interface RateLimitOptions {
+  windowSeconds: number // Durasi window sliding dalam detik
+  maxRequests: number   // Maksimum request dalam window
+  keyPrefix?: string    // Prefix key Redis untuk isolasi endpoint
+}
+
+// Middleware rate limiter berbasis Redis sliding window
+export const createRateLimit = ({ windowSeconds, maxRequests, keyPrefix = 'rl' }: RateLimitOptions) => {
+  return async (c: Context, next: Next) => {
+    // Jika Redis tidak tersedia, lewati rate limit (fail-open)
+    if (redis.status !== 'ready') return next()
+
+    const ip = c.req.header('x-forwarded-for') ?? c.req.header('x-real-ip') ?? 'unknown'
+    const key = `${keyPrefix}:${c.req.path}:${ip}`
+
+    try {
+      const current = await redis.incr(key)
+      if (current === 1) await redis.expire(key, windowSeconds)
+
+      if (current > maxRequests) {
+        return c.json(apiError('Terlalu banyak permintaan. Coba lagi nanti.', 429), 429)
+      }
+    } catch {
+      // Fail-open: jika Redis error, izinkan request berlanjut
+    }
+
+    return next()
+  }
+}
+
+// Preset rate limit untuk endpoint sensitif (login, OTP, register)
+export const strictRateLimit = createRateLimit({ windowSeconds: 60, maxRequests: 5, keyPrefix: 'rl:strict' })
+
+// Preset rate limit untuk endpoint umum API
+export const defaultRateLimit = createRateLimit({ windowSeconds: 60, maxRequests: 60, keyPrefix: 'rl:default' })
+```
+
+### H. Drizzle Config (`drizzle.config.ts`)
+```typescript
+import { defineConfig } from 'drizzle-kit'
+import { env } from './src/core/config/env'
+
+// Konfigurasi Drizzle Kit untuk generate dan migrate schema MySQL
+export default defineConfig({
+  dialect: 'mysql',
+  schema: './src/core/db/schema/index.ts',
+  out: './drizzle',
+  dbCredentials: {
+    host: env.DB_HOST,
+    port: parseInt(env.DB_PORT, 10),
+    user: env.DB_USER,
+    password: env.DB_PASSWORD,
+    database: env.DB_NAME,
+  },
+})
+```
+
+### I. Entry Point & Graceful Shutdown (`src/index.ts`)
+```typescript
+import { Hono } from 'hono'
+import { cors } from 'hono/cors'
+import { logger } from 'hono/logger'
+import { db, pool } from './core/db'
+import { redis } from './core/db/redis'
+import { apiError } from './core/utils/response.util'
+
+const app = new Hono()
+
+// Pasang CORS, logger, dan default rate limit
+app.use('*', cors())
+app.use('*', logger())
+
+// Health check endpoint — digunakan load balancer untuk readiness probe
+app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }))
+
+// Centralized error handler — jangan bocorkan detail stack atau SQL ke client
+app.onError((err, c) => {
+  console.error('[App Error]', err.message)
+  return c.json(apiError('Terjadi kesalahan pada server. Coba lagi nanti.'), 500)
+})
+
+// 404 handler untuk route yang tidak terdaftar
+app.notFound((c) => c.json(apiError('Endpoint tidak ditemukan.', 404), 404))
+
+// Mount route domain (tambahkan di sini setiap modul baru)
+// app.route('/api/categories', categoriesRoute)
+
+const server = Bun.serve({
+  port: parseInt(process.env.PORT ?? '3000', 10),
+  fetch: app.fetch,
+})
+
+console.log(`Server berjalan di http://localhost:${server.port}`)
+
+// Graceful shutdown — tutup DB pool dan Redis saat menerima sinyal sistem
+const shutdown = async (signal: string) => {
+  console.log(`[Shutdown] Menerima sinyal ${signal}, menutup koneksi...`)
+  server.stop()
+  await pool.end()
+  await redis.quit()
+  console.log('[Shutdown] Semua koneksi berhasil ditutup.')
+  process.exit(0)
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))
+```
+
 ---
 
-## 4. Aturan Autentikasi & Keamanan Hak Akses
+## 5. Aturan Autentikasi & Keamanan Hak Akses
 
 1. **Ambil Identitas Pengguna dari Token Context**:
    - Jangan pernah mempercayai `userId` dari body request untuk resource privat! Selalu ambil dari konteks token yang sudah diverifikasi:
@@ -418,7 +573,7 @@ export const deleteSession = async (token: string) =>
 
 ---
 
-## 5. Aturan Database & Performa Query
+## 6. Aturan Database & Performa Query
 
 ### ⚠️ DILARANG Query Database di Dalam Loop (`for`, `forEach`, `map`)
 Pemanggilan query DB di dalam perulangan memicu masalah **N+1 Query** yang membebani database:
@@ -451,9 +606,16 @@ return await db.transaction(async (tx) => {
 })
 ```
 
+### Seleksi Kolom Eksplisit (Hindari SELECT *)
+Dilarang menggunakan `db.select().from(table)` tanpa filter kolom jika tabel mengandung field sensitif (passwordHash, pinCode, secret). Gunakan `db.select({ id: table.id, name: table.name }).from(table)` untuk membatasi payload dan mencegah data sensitif bocor ke response.
+
+### Kapan Gunakan Cursor vs Offset Pagination
+- **Offset Pagination** (`LIMIT x OFFSET y`): Digunakan untuk data statis dengan total record yang perlu ditampilkan (dashboard admin, laporan). Mudah diimplementasikan tapi kurang efisien untuk dataset sangat besar.
+- **Cursor Pagination** (`WHERE id > lastId ORDER BY id`): Wajib digunakan untuk feed real-time, data yang terus berubah, atau dataset >100k record. Lebih performa karena tidak menghitung offset yang besar.
+
 ---
 
-## 6. Standar Response API & Aturan Ketat Pagination vs All
+## 7. Standar Response API & Aturan Ketat Pagination vs All
 
 ### ⚠️ 1 Endpoint = 1 Format Respons Pasti
 - **DILARANG KERAS** mengubah struktur response secara dinamis (misal return paginasi jika tanpa query, return array jika ada query `?all=true`). Format respons harus deterministik.
@@ -489,9 +651,22 @@ Khusus digunakan untuk **dropdown, select picker, atau combobox**:
 }
 ```
 
+### C. Backward Compatibility API Contract
+Jika endpoint yang sudah digunakan client aktif perlu diubah response contract-nya, wajib:
+1. Tambahkan field baru tanpa menghapus field lama (additive change).
+2. Jika tidak terhindarkan, buat versi baru endpoint (`/api/v2/[domain]`) dan beri deprecated notice pada versi lama.
+3. Dilarang mengubah tipe data, nama field, atau struktur response yang sudah ada secara sembarangan.
+
+### D. Rate Limit pada Endpoint Sensitif
+Wajib pasang rate limit ketat (`strictRateLimit`) pada endpoint berisiko tinggi:
+- `POST /api/auth/login`
+- `POST /api/auth/register`
+- `POST /api/auth/otp`
+- Semua endpoint public yang dapat diakses tanpa autentikasi.
+
 ---
 
-## 7. Aturan Dokumentasi Komentar Kode (Bahasa Indonesia)
+## 8. Aturan Dokumentasi Komentar Kode (Bahasa Indonesia)
 
 1. **Wajib di Seluruh File Kode**: Setiap berkas kode tanpa terkecuali (baik di level `core/`, `db/`, `middlewares/`, `helpers/`, `utils/`, `mail/`, `services/`, maupun `modules/` [schema, service, controller, route, test]) **WAJIB** diberikan komentar penjelasan alur dan fungsinya dalam **Bahasa Indonesia**.
 2. **Komentar Bertahap**: Berikan komentar terstruktur pada setiap tahapan logika (contoh: `// 1. Validasi keberadaan data`, `// 2. Kalkulasi nominal`, `// 3. Simpan perubahan ke database`).
@@ -499,7 +674,7 @@ Khusus digunakan untuk **dropdown, select picker, atau combobox**:
 
 ---
 
-## 8. Standar Koleksi Bruno API (`.bru`)
+## 9. Standar Koleksi Bruno API (`.bru`)
 
 Setiap kali selesai membuat atau memperbarui endpoint API, **WAJIB** membuat atau memperbarui berkas koleksi Bruno di folder luar (`../bruno/`):
 
@@ -537,7 +712,7 @@ body:json {
 
 ---
 
-## 9. Template Modul Domain Lengkap (Pola 5 File)
+## 10. Template Modul Domain Lengkap (Pola 5 File)
 
 Contoh implementasi modul `categories`:
 
@@ -760,7 +935,7 @@ describe('Categories Module Schema & Self-Check', () => {
 
 ---
 
-## 10. Standar Penulisan Utils vs Helpers
+## 11. Standar Penulisan Utils vs Helpers
 
 Pemisahan tanggung jawab antara `utils` dan `helpers`:
 
@@ -783,7 +958,7 @@ Pemisahan tanggung jawab antara `utils` dan `helpers`:
 
 ---
 
-## 11. Standar Layanan Integrasi API Vendor (External Services)
+## 12. Standar Layanan Integrasi API Vendor (External Services)
 
 Simpan integrasi vendor pihak ketiga (payment gateway, ekspedisi kurir, SMS/WhatsApp gateway, dsb) di:
 - `src/core/services/[vendor].service.ts` jika dipakai lintas modul.
@@ -868,7 +1043,7 @@ export const createVendorChargeService = async (
 
 ---
 
-## 12. Layanan Email SMTP (Config, Template, & Function)
+## 13. Layanan Email SMTP (Config, Template, & Function)
 
 Gunakan `nodemailer` dengan connection pool di `src/core/mail/` untuk pengiriman email transaksional (OTP, verifikasi akun, notifikasi invoice).
 

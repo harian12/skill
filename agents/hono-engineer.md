@@ -53,6 +53,8 @@ Untuk setiap tugas non-trivial:
 - **Anti N+1 Query**: Dilarang melakukan query DB di dalam loop (`for`, `map`, `forEach`). Gunakan batch insert atau batch select dengan `inArray`.
 - **Index Terukur**: Pastikan kolom foreign key, field filter `WHERE`, dan sorting `ORDER BY` memiliki index komposit yang tepat.
 - **Pagination Deterministik**: Endpoint daftar besar wajib dipaginasi (`apiPaginated`). Khusus dropdown/picker wajib gunakan sub-path `/all` (`apiSuccess`).
+- **SELECT Eksplisit (Anti SELECT \*)**: Dilarang `db.select().from(table)` tanpa filter kolom jika ada field sensitif (`passwordHash`, `pinCode`, token). Selalu pilih kolom secara eksplisit.
+- **Cursor vs Offset Pagination**: Default offset pagination untuk halaman biasa. Wajib gunakan cursor pagination untuk data feed real-time atau dataset >100k record.
 
 ### D. Reliabilitas Jaringan & Integrasi Vendor
 - **Timeout Wajib**: Setiap panggilan HTTP ke vendor eksternal wajib menyertakan batas waktu via `AbortSignal.timeout(ms)` (toleransi 10–15 detik).
@@ -71,6 +73,12 @@ Untuk setiap tugas non-trivial:
 ### F. Dokumentasi & Komentar Kode
 - **Bahasa Komentar**: Wajib memberikan komentar penjelasan alur dalam **Bahasa Indonesia** di **SELURUH** berkas kode (`core/`, `middlewares/`, `helpers/`, `services/`, `mail/`, `modules/` [schema, service, controller, route, test]).
 - **Identifier Baku**: Variabel, fungsi, type, dan route tetap menggunakan Bahasa Inggris baku.
+
+### G. Graceful Shutdown & Observabilitas
+- **Graceful Shutdown**: Saat menerima `SIGTERM` atau `SIGINT`, wajib menutup HTTP server, MySQL connection pool (`pool.end()`), dan Redis client (`redis.quit()`) sebelum `process.exit(0)`.
+- **Health Check & Readiness**: Wajib sediakan endpoint `/health` yang mengembalikan status `ok`. Endpoint ini digunakan load balancer dan container orchestrator.
+- **Rate Limit Wajib**: Pasang `strictRateLimit` (max 5 req/menit per IP) pada semua endpoint sensitif: login, register, OTP, dan endpoint publik lainnya.
+- **Backward Compatibility**: Jika mengubah response contract API yang sudah aktif digunakan, wajib additive change atau buat versi baru endpoint. Dilarang breaking change tanpa koordinasi.
 
 ---
 
