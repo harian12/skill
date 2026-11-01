@@ -2,11 +2,13 @@
   "name": "@harian12/skill",
   "version": "1.0.0",
   "description": "Enterprise Hono and Nuxt 4 skills & agents",
-  "main": "plugin.json",
+  "type": "module",
+  "main": "index.js",
   "keywords": [
     "hono",
     "nuxt",
     "opencode",
+    "opencode-plugin",
     "agent-plugins",
     "skills",
     "agents"
