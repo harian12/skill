@@ -1,0 +1,44 @@
+1.Maximalist Scrapbook (Playful Zine & Collage)
+Sebuah gaya yang mendobrak semua aturan minimalisme. Desain ini dibuat agar terlihat seperti hasil gunting-tempel kliping majalah, coretan tangan, dan tumpukan kertas yang berantakan tapi sangat kreatif.
+
+Ciri Khas:
+
+Warna-warna pastel atau neon yang sangat beragam dan saling bertabrakan.
+
+Tekstur kertas sobek, isolasi/lakban (tape borders), dan stiker-stiker dekoratif.
+
+Tulisan tangan (handwritten fonts), coretan, panah-panah penunjuk, dan ikon ilustrasi yang ekspresif.
+
+Layout yang asimetris, tumpang tindih, dan seolah-olah "tidak rapi".
+
+Sangat cocok untuk: Portofolio agensi kreatif, situs web komunitas anak muda, zine digital, atau brand fashion/seni.
+
+2. Claymorphism (3D Soft & Fluffy)
+Berbeda dengan Flat Design yang datar atau Neumorphism yang pucat, Claymorphism memberikan efek 3D seperti mainan tanah liat (clay) atau balon karet yang mengembang dan empuk.
+
+Tampilan Visualnya: Sudut kartu yang sangat membulat (rounded-3xl), warna-warna pastel yang cerah, dan kombinasi dua bayangan di bagian dalam (inner shadow)—satu bayangan terang di sudut kiri atas dan satu bayangan gelap di sudut kanan bawah—sehingga elemen terlihat menonjol dan bervolume.
+
+Cocok Untuk: Game edukasi interaktif, aplikasi belajar anak/remaja, onboarding screen, atau aplikasi keuangan kasual.
+
+3. Aurora & Mesh Gradient (Organic Ambient UI)
+Mengandalkan perpaduan warna gradasi organik yang membaur halus di latar belakang (seperti cahaya aurora), dipadukan dengan elemen antarmuka yang sangat bersih dan melayang.
+
+Tampilan Visualnya: Latar belakang memiliki bola-bola warna lembut (ungu, biru laut, magenta) dengan efek blur raksasa yang saling bertumpuk, sementara kartu di atasnya menggunakan warna putih bersih atau semi-transparan dengan tipografi modern yang tegas.
+
+Cocok Untuk: Aplikasi wellness/kesehatan, halaman utama produk AI generasi baru, dan landing page SaaS modern.
+
+4. Neumorphism (Soft Extruded Plastic)
+Berbeda dengan Claymorphism yang tampak seperti balon mengembang atau Skeuomorphism yang meniru tekstur benda nyata, Neumorphism menciptakan ilusi bahwa kartu dan tombol "menyatu" dan dicetak timbul langsung dari permukaan latar belakangnya (seperti plastik cetakan yang halus).
+
+Kunci Visual: Warna kartu harus 100% sama persis dengan warna latar belakang (misalnya abu-abu kebiruan #E0E5EC). Efek timbul dibuat dari dua bayangan luar: bayangan putih terang di kiri-atas dan bayangan abu-abu gelap di kanan-bawah. Saat tombol ditekan, bayangannya berubah menjadi inset (cekung ke dalam).
+
+Cocok Untuk: Aplikasi smart home remote, pemutar musik minimalis, kalkulator, atau pengatur suhu/timer.
+
+5. Comic / Halftone Pop-Art (Persona 5 / Spider-Verse Style)
+Mengubah antarmuka web menjadi seperti halaman komik hidup atau menu game Persona 5 yang penuh energi dan sangat dinamis.
+
+Kunci Visual: Latar belakang menggunakan pola titik-titik cetak komik (CSS radial-gradient halftone dots), kotak yang sedikit dimiringkan (transform: rotate(-1deg) atau skew), garis tepi hitam super tebal, warna kuning-merah-hitam yang meledak, serta badge berbentuk balon kata komik.
+
+Cocok Untuk: Game kuis/arena edukasi, aplikasi turnamen/kompetisi, atau landing page acara yang butuh hype tinggi.
+
+
