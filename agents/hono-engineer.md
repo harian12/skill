@@ -42,12 +42,14 @@ Untuk setiap tugas non-trivial:
 - **Sanitasi Log**: Dilarang keras mencatat password, token JWT, OTP, API key, atau data PII ke console/log.
 - **Fail-Closed untuk Keamanan**: Jika layanan otentikasi/otorisasi gagal, tolak akses (fail-closed).
 - **Primary Key**: Selalu gunakan UUIDv7 terurut waktu (`v7 as uuidv7` dari package `uuid`).
+- **File Upload**: Batasi ukuran payload (`bodyLimit`), validasi MIME type di server, simpan di storage terpisah (R2/S3), dan jangan percaya ekstensi file dari client.
 
 ### B. Integritas Data & Konkurensi
 - **Transaksi DB**: Operasi multi-tabel atau perubahan saldo/kuota wajib dibungkus `db.transaction`.
 - **Race Condition & Financial Workflows**: Untuk operasi saldo/uang, gunakan integer minor unit (sen) atau `decimal`. Terapkan update kondisional atomik (`balance >= amount`) atau `FOR UPDATE` row lock.
 - **Idempotency**: Operasi pembayaran atau mutasi kritis wajib mendukung header idempotency (`X-Idempotency-Key`).
 - **Anti Floating-Point**: Dilarang menggunakan tipe float/double untuk representasi mata uang.
+- **Refresh Token Rotasi**: Refresh token wajib dirotasi setiap dipakai (anti replay). Simpan token aktif per user di Redis (`refresh:${userId}`); token yang tidak cocok = reuse/compromise → revoke semua sesi user.
 
 ### C. Database & Performa Query
 - **Anti N+1 Query**: Dilarang melakukan query DB di dalam loop (`for`, `map`, `forEach`). Gunakan batch insert atau batch select dengan `inArray`.
@@ -61,6 +63,7 @@ Untuk setiap tugas non-trivial:
 - **Zod Contract Parsing**: Selalu validasi response payload dari vendor pihak ketiga dengan skema Zod sebelum diproses aplikasi.
 - **Fail-Safe Caching**: Operasi Redis pendukung cache wajib dibungkus try/catch fail-open agar aplikasi tetap menyala saat Redis offline.
 - **Fallback & Circuit Behavior**: Tentukan perilaku saat vendor/Redis gagal sebelum implementasi: fallback data statis, queue ulang, atau fail-fast. Cache boleh fail-open; operasi yang menyentuh uang/mutasi wajib fail-closed.
+- **Background Job**: Untuk proses async (email massal, notifikasi, rekonsiliasi), gunakan Redis stream + consumer group. Handler wajib idempotent, retry maks 3x, lalu dead-letter. Jangan taruh job penting di memory proses.
 
 ### E. Disiplin Lingkungan & Wiring
 - **Environment Variables**: Dilarang mengakses `process.env` mentah di file modul! Wajib daftarkan di Zod `src/core/config/env.ts` dan `.env.example`.
@@ -69,6 +72,7 @@ Untuk setiap tugas non-trivial:
   - Export helper baru di `src/core/helpers/index.ts`.
   - Mount router baru di `src/index.ts` (`app.route('/api/[domain]', domainRoute)`).
 - **Otomasi Migrasi**: Jalankan `bun run db:generate` dan `bun run db:migrate` setiap kali skema tabel berubah.
+- **Seeder Idempotent**: Seeder (`src/core/db/seed.ts`) wajib aman dijalankan berulang — cek `count()`/eksistensi sebelum insert atau pakai `onConflictDoNothing`. Dilarang hardcode password admin di repo (ambil dari env).
 - **Format Validasi Zod**: Error validasi dari `zValidator` wajib diformat seragam menggunakan helper `apiError`.
 
 ### F. Dokumentasi & Komentar Kode

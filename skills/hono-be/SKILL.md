@@ -134,7 +134,7 @@ Konfigurasi `tsconfig.json`:
 │   │   ├── db/
 │   │   │   ├── index.ts          # MySQL pool connection & Drizzle client
 │   │   │   ├── redis.ts          # ioredis client (session caching)
-│   │   │   ├── seed.ts           # Database seeder awal
+│   │   │   ├── seed.ts           # Database seeder awal (idempotent)
 │   │   │   └── schema/           # Tabel-tabel Drizzle
 │   │   │       ├── index.ts      # Barrel export semua schema
 │   │   │       ├── users.ts      # Tabel user / otentikasi
@@ -143,10 +143,15 @@ Konfigurasi `tsconfig.json`:
 │   │   │   ├── index.ts          # Barrel export semua helpers
 │   │   │   ├── cache.helper.ts   # Fail-safe Redis cache & session helper
 │   │   │   └── auth.helper.ts    # Sanitizer data user (strip passwordHash, pinCode)
+│   │   ├── jobs/                 # Background job worker (Redis stream)
+│   │   │   ├── producer.ts       # Enqueue job ke Redis stream
+│   │   │   └── worker.ts         # Consumer loop idempotent + retry/dead-letter
 │   │   ├── middlewares/
-│   │   │   ├── auth.middleware.ts       # Validasi bearer token dari Redis/JWT & role guard
-│   │   │   ├── logger.middleware.ts     # Structured JSON request/response logger
-│   │   │   └── rateLimit.middleware.ts  # Redis sliding-window rate limiter
+│   │   │   ├── auth.middleware.ts           # Validasi bearer token dari Redis/JWT & role guard
+│   │   │   ├── logger.middleware.ts         # Structured JSON request/response logger
+│   │   │   ├── rateLimit.middleware.ts      # Redis sliding-window rate limiter
+│   │   │   ├── requestId.middleware.ts      # Correlation ID (X-Request-Id)
+│   │   │   └── securityHeaders.middleware.ts # Header keamanan standar
 │   │   ├── mail/                 # Modul email SMTP
 │   │   │   ├── config.ts         # Transporter nodemailer (connection pool)
 │   │   │   ├── index.ts          # Fungsi sendEmail & tipe email
@@ -434,6 +439,53 @@ export const verifyToken = (token: string): JwtPayload | null => {
     return null
   }
 }
+
+// Buat refresh token JWT dengan masa berlaku 30 hari (secret terpisah dari access token)
+export const signRefreshToken = (payload: Omit<JwtPayload, 'iat' | 'exp'>): string =>
+  jwt.sign(payload, env.JWT_REFRESH_SECRET, { expiresIn: '30d' })
+
+// Verifikasi dan decode refresh token
+export const verifyRefreshToken = (token: string): JwtPayload | null => {
+  try {
+    return jwt.verify(token, env.JWT_REFRESH_SECRET) as JwtPayload
+  } catch {
+    return null
+  }
+}
+
+// Buat pasangan access + refresh token dalam satu langkah
+export const issueTokenPair = (payload: Omit<JwtPayload, 'iat' | 'exp'>) => ({
+  accessToken: signToken(payload),
+  refreshToken: signRefreshToken(payload),
+})
+```
+
+**Aturan Refresh Token (Rotasi + Deteksi Reuse):**
+- Refresh token **wajib dirotasi**: setiap kali dipakai untuk menerbitkan access token baru, refresh token lama wajib diinvalidasi dan diganti token baru.
+- Simpan hash refresh token aktif per user di Redis (`refresh:${userId}`). Saat token masuk tidak cocok dengan hash tersimpan → indikasi **reuse/compromise** → revoke seluruh sesi user (fail-closed).
+- Contoh helper rotasi:
+```typescript
+// src/core/helpers/auth.helper.ts — deteksi reuse refresh token
+import { redis } from '../db/redis'
+import { verifyRefreshToken, signRefreshToken } from '../utils/auth.util'
+
+// Rotasi refresh token: tolak token yang sudah pernah dipakai (anti replay)
+export const rotateRefreshToken = async (oldToken: string, userId: string) => {
+  const payload = verifyRefreshToken(oldToken)
+  if (!payload) return null
+
+  const key = `refresh:${userId}`
+  const stored = await redis.get(key)
+  if (!stored || stored !== oldToken) {
+    // Reuse terdeteksi — revoke semua sesi user
+    await redis.del(key)
+    return null
+  }
+
+  const newToken = signRefreshToken({ id: payload.id, sub: payload.sub, role: payload.role })
+  await redis.set(key, newToken, 'EX', 30 * 24 * 3600) // 30 hari
+  return newToken
+}
 ```
 
 ### G. Rate Limit Middleware (`src/core/middlewares/rateLimit.middleware.ts`)
@@ -504,15 +556,21 @@ export default defineConfig({
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
+import { bodyLimit } from 'hono/body-limit'
 import { db, pool } from './core/db'
 import { redis } from './core/db/redis'
 import { apiError } from './core/utils/response.util'
+import { requestId } from './core/middlewares/requestId.middleware'
+import { securityHeaders } from './core/middlewares/securityHeaders.middleware'
 
 const app = new Hono()
 
-// Pasang CORS, logger, dan default rate limit
+// Pasang CORS, logger, request ID, security headers, body limit, dan default rate limit
 app.use('*', cors())
 app.use('*', logger())
+app.use('*', requestId)
+app.use('*', securityHeaders)
+app.use('*', bodyLimit({ maxSize: 1 * 1024 * 1024 })) // Batas payload 1 MB
 
 // Health check endpoint — digunakan load balancer untuk readiness probe
 app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }))
@@ -548,6 +606,83 @@ const shutdown = async (signal: string) => {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'))
 process.on('SIGINT', () => shutdown('SIGINT'))
+```
+
+### J. Database Seeder (`src/core/db/seed.ts`)
+Seeder wajib **idempotent**: boleh dijalankan berulang tanpa duplikasi. Gunakan `onConflictDoNothing` atau cek `count()` sebelum insert:
+```typescript
+import { eq } from 'drizzle-orm'
+import { v7 as uuidv7 } from 'uuid'
+import { db } from './index'
+import { users, categories } from './schema'
+import { hashPassword } from '../utils/auth.util'
+
+// Seeder idempotent: aman dijalankan berulang kali
+export const runSeed = async () => {
+  // Cek dulu baru insert — mencegah duplikasi saat seed dijalankan ulang
+  const [existingAdmin] = await db.select().from(users).where(eq(users.email, 'admin@domain.com')).limit(1)
+  if (!existingAdmin) {
+    await db.insert(users).values({
+      id: uuidv7(),
+      email: 'admin@domain.com',
+      passwordHash: await hashPassword(process.env.SEED_ADMIN_PASSWORD ?? 'ChangeMe123!'),
+      role: 'ADMIN',
+    })
+  }
+
+  // Kategori default pakai upsert style — insert hanya jika belum ada
+  const [existingCategory] = await db.select().from(categories).limit(1)
+  if (!existingCategory) {
+    await db.insert(categories).values([
+      { id: uuidv7(), name: 'Operasional', type: 'EXPENSE' },
+      { id: uuidv7(), name: 'Penjualan', type: 'INCOME' },
+    ])
+  }
+
+  console.log('[Seed] Data awal berhasil dijamin tersedia (idempotent).')
+}
+
+// Jalankan hanya saat dipanggil langsung: bun run src/core/db/seed.ts
+if (import.meta.main) {
+  await runSeed()
+  process.exit(0)
+}
+```
+
+### K. Request ID Middleware (`src/core/middlewares/requestId.middleware.ts`)
+Setiap request wajib punya correlation ID untuk tracing lintas service:
+```typescript
+import type { Context, Next } from 'hono'
+import { v7 as uuidv7 } from 'uuid'
+
+// Middleware: terima X-Request-Id dari client atau generate baru, set di header & context
+export const requestId = async (c: Context, next: Next) => {
+  const incoming = c.req.header('X-Request-Id')
+  const id = incoming || uuidv7()
+
+  c.set('requestId', id)
+  c.header('X-Request-Id', id)
+
+  // Teruskan request ID ke logger terstruktur
+  await next()
+}
+```
+
+### L. Security Headers Middleware (`src/core/middlewares/securityHeaders.middleware.ts`)
+```typescript
+import type { Context, Next } from 'hono'
+
+// Middleware: pasang header keamanan standar pada semua response
+export const securityHeaders = async (c: Context, next: Next) => {
+  await next()
+
+  c.header('X-Content-Type-Options', 'nosniff')
+  c.header('X-Frame-Options', 'DENY')
+  c.header('X-XSS-Protection', '0') // XSS filter browser sudah deprecated, nonaktifkan
+  c.header('Referrer-Policy', 'no-referrer')
+  c.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
+  c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains') // hanya aktif di HTTPS
+}
 ```
 
 ---
@@ -933,6 +1068,34 @@ describe('Categories Module Schema & Self-Check', () => {
 })
 ```
 
+### 6. `categories.service.test.ts` (Mock DB)
+Uji logic service tanpa menyentuh database nyata — mock modul `db`:
+```typescript
+import { describe, expect, it, mock } from 'bun:test'
+
+// Mock modul db: semua query DB diganti fungsi dummy terkontrol
+mock.module('@/core/db', () => ({
+  db: {
+    select: () => [],
+    insert: () => ({ values: () => [] }),
+  },
+}))
+
+const { listCategoriesService } = await import('./categories.service')
+
+describe('Categories Service (Mock DB)', () => {
+  it('harus mengembalikan array kosong saat belum ada kategori', async () => {
+    const result = await listCategoriesService({ page: 1, limit: 10 })
+    expect(Array.isArray(result)).toBe(true)
+    expect(result.length).toBe(0)
+  })
+})
+```
+
+**Aturan test service/controller:**
+- Mock hanya untuk boundary IO (DB, Redis, vendor). Logic murni jangan di-mock.
+- Untuk flow database nyata (transaction, constraint), gunakan integration test terpisah — jangan di-mock.
+
 ---
 
 ## 11. Standar Penulisan Utils vs Helpers
@@ -1151,4 +1314,123 @@ export const sendEmail = async ({
 export * from './config'
 export * from './templates/otp.template'
 ```
+
+---
+
+## 14. Background Jobs & Worker (Redis Stream)
+
+Pakai **Redis Stream + Consumer Group** (ioredis sudah terpasang, tanpa dependency baru). Cocok untuk: kirim email massal, notifikasi, rekonsiliasi vendor, laporan async.
+
+### A. Producer (`src/core/jobs/producer.ts`)
+```typescript
+import { redis } from '../db/redis'
+
+export interface JobPayload<T = unknown> {
+  type: string // Nama job, contoh: 'send-email'
+  data: T
+}
+
+// Enqueue job ke stream — fail-safe jika Redis offline
+export const enqueueJob = async <T>(stream: string, job: JobPayload<T>): Promise<boolean> => {
+  try {
+    if (redis.status === 'ready') {
+      await redis.xadd(stream, 'MAXLEN', '~', 10000, '*', 'job', JSON.stringify(job))
+      return true
+    }
+  } catch (err) {
+    console.warn(`[Job] Gagal enqueue ke stream "${stream}":`, err)
+  }
+  return false
+}
+```
+
+### B. Worker (`src/core/jobs/worker.ts`)
+Handler **wajib idempotent** + dead-letter saat gagal permanen:
+```typescript
+import { redis } from '../db/redis'
+
+const STREAM = 'jobs:main'
+const GROUP = 'workers'
+const DLQ = 'jobs:dead'
+const MAX_RETRY = 3 // Maksimum percobaan ulang per job
+
+export interface JobMessage<T = unknown> {
+  id: string // ID entry stream
+  job: JobPayload<T>
+  retries: number // Diambil dari field retries di payload
+}
+
+// Pastikan stream dan consumer group tersedia sebelum mulai konsumsi
+const ensureGroup = async () => {
+  try {
+    await redis.xgroup('CREATE', STREAM, GROUP, '0', 'MKSTREAM')
+  } catch (err: any) {
+    if (!String(err.message).includes('BUSYGROUP')) throw err // Group sudah ada — lanjut
+  }
+}
+
+// Handler job: WAJIB idempotent (aman dijalankan ulang tanpa efek ganda)
+const processJob = async (msg: JobMessage): Promise<boolean> => {
+  switch (msg.job.type) {
+    case 'send-email':
+      // Panggil sendEmail() — idempotent karena email ganda lebih aman daripada hilang
+      return true
+    default:
+      console.warn(`[Worker] Job type "${msg.job.type}" tidak dikenal, dilewati.`)
+      return true // Tidak dikenal dianggap selesai agar tidak memblokir stream
+  }
+}
+
+// Konsumsi terus-menerus dari stream
+export const startWorker = async () => {
+  await ensureGroup()
+  console.log('[Worker] Consumer group siap, mulai mendengarkan stream...')
+
+  // Loop utama: baca, proses, ack atau dead-letter
+  while (true) {
+    const results = await redis.xreadgroup(
+      'GROUP', GROUP, 'worker-1',
+      'COUNT', 10,
+      'BLOCK', 5000, // Block 5 detik — idle tanpa busy loop
+      'STREAMS', STREAM, '>'
+    )
+
+    for (const [, entries] of results as any[]) {
+      for (const [id, fields] of entries) {
+        const raw = fields.find((_: string, i: number) => fields[i - 1] === 'job')
+        const job = JSON.parse(raw)
+        const retries = job.__retries ?? 0
+        let lastError = ''
+
+        try {
+          const ok = await processJob({ id, job, retries })
+          if (ok) {
+            await redis.xack(STREAM, GROUP, id) // Konfirmasi selesai
+            continue
+          }
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : String(err)
+          console.error(`[Worker] Gagal proses job ${id}:`, lastError)
+        }
+
+        // Gagal: retry atau lempar ke dead-letter
+        if (retries + 1 >= MAX_RETRY) {
+          await redis.xadd(DLQ, '*', 'job', JSON.stringify(job), 'error', lastError)
+          await redis.xack(STREAM, GROUP, id)
+        } else {
+          // Kirim ulang dengan counter retry bertambah
+          await redis.xadd(STREAM, 'MAXLEN', '~', 10000, '*', 'job', JSON.stringify({ ...job, __retries: retries + 1 }))
+          await redis.xack(STREAM, GROUP, id)
+        }
+      }
+    }
+  }
+}
+```
+
+### C. Aturan Background Job
+1. **Handler idempotent**: job boleh diproses ulang tanpa efek ganda (duplicate email OK, double charge TIDAK).
+2. **Dead-letter + retry**: maksimum 3 percobaan, lalu masuk stream `jobs:dead` untuk investigasi manual.
+3. **Graceful shutdown**: stop loop worker di handler `SIGTERM` — jangan biarkan job setengah diproses hilang (consumer group menjamin recovery otomatis).
+4. **Jangan taruh job penting hanya di memory**: gunakan Redis stream agar survive restart proses.
 
