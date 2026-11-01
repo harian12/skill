@@ -4,13 +4,34 @@ description: Scaffold dan buat backend project Hono modular domain-driven dengan
 allowed-tools: Read Write Edit Glob Grep Shell
 ---
 
-# Hono Backend Scaffold & Module Skill (Modular Domain-Driven Standard)
+# Hono Backend Engineering Reference (Adaptive Senior Standard)
 
-Gunakan skill ini untuk menginisialisasi project backend Hono baru atau menambahkan modul domain baru dengan arsitektur **domain-driven modular**, performa tinggi, clean code, dan standar keamanan ketat.
+Gunakan skill ini untuk menginisialisasi project backend Hono baru atau menambahkan modul domain baru dengan arsitektur **domain-driven modular**, performa tinggi, clean code, dan standar keamanan ketat. Adaptasikan dengan arsitektur project yang sudah ada dan jangan memaksakan template jika tidak proporsional.
 
 ---
 
-## 0. Panduan Alur Kerja Agen (Workflow Checklist)
+## 0. Prinsip Senior & Decision Gate
+
+Sebelum mengimplementasikan kode, tentukan terlebih dahulu:
+1. **Status Project**: Apakah project baru (fresh scaffold) atau existing? **Dilarang keras menimpa atau men-scaffold ulang project yang sudah berjalan**.
+2. **Kompleksitas Domain**: Apakah modul sederhana (CRUD biasa) atau domain kritis (keuangan, inventory, transaksi multi-step)?
+3. **Konvensi & Integrasi**: Hormati konvensi folder, nama, dan stack yang sudah terpasang. Gunakan komponen yang ada sebelum membuat abstraksi baru.
+
+### Referensi Mendalam & Review Checklists
+Gunakan berkas referensi modular saat menghadapi kasus khusus:
+- Arsitektur & Seam: `references/architecture.md`
+- Database & Indeks: `references/database-design.md`
+- Transaksi, Locking & Idempotency: `references/transactions-concurrency.md`
+- Security, Sanitasi & IDOR: `references/security.md`
+- Redis Reliability & Background Queue: `references/reliability-redis-queue.md`
+- Desain API & Kontrak: `references/api-design.md`
+- Strategi Testing: `references/testing.md`
+- Observabilitas & Logging: `references/production-observability.md`
+- Review Checklist: `checklists/implementation-review.md` & `checklists/security-review.md`
+
+---
+
+## 1. Panduan Alur Kerja Agen (Workflow Checklist)
 
 Pilih salah satu alur kerja saat mengeksekusi instruksi:
 

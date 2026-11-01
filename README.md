@@ -9,7 +9,9 @@ Repositori standar arsitektur, pedoman AI agent, dan blueprint skill untuk penge
 ├── package.json                # Manifest package metadata
 ├── skills/                     # Folder skill terdaftar
 │   ├── hono-be/
-│   │   └── SKILL.md            # Blueprint skill backend Hono modular
+│   │   ├── SKILL.md            # Blueprint skill backend Hono modular
+│   │   ├── references/         # Deep modular guides (arsitektur, transaksi, DB, security, redis, testing)
+│   │   └── checklists/         # Checklist implementasi & security review
 │   └── nuxt-fe/
 │       └── SKILL.md            # Blueprint skill frontend Nuxt 4 enterprise
 ├── agents/                     # Definisi subagents
